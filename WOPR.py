@@ -5,10 +5,11 @@ from discord import app_commands
 import datetime
 import requests
 import openai
+import os
 
 MY_GUILD = discord.Object(id=1087821593394282526)
 
-openai.api_key = "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"
+openai.api_key = os.environ.get("OpenAIAPI-Token")
 model_engine = "gpt-3.5-turbo"
 
 intents = discord.Intents(messages=True, guilds=True, message_content=True)
@@ -168,4 +169,4 @@ async def on_message(message):
     conversation[message.author] = convo
     await message.channel.send(content)
       
-client.run('MTA4NzgyMDY1NzcxNjM3OTczOA.Gzf50P.wfNJiHBmz6b9mVeER0on--fxXKEuvOecQsQOa0')
+client.run(os.environ.get("Discord-Token"))

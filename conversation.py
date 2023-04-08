@@ -1,3 +1,4 @@
+import openai
 class Conversation:
     def __init__(self, user, system="You are a helpful AI assistant.", assistant=None):
         self.user = user
@@ -42,7 +43,6 @@ class Conversation:
     def __ne__(self, other):
         return self.user != other.user or self.messages != other.messages
 
-import openai
 class ConversationManager:
     def __init__(self):
         self.conversations = {}

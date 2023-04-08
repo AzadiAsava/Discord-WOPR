@@ -42,9 +42,22 @@ class Conversation:
     def __ne__(self, other):
         return self.user != other.user or self.messages != other.messages
 
+import openai
 class ConversationManager:
     def __init__(self):
         self.conversations = {}
+    def update_current_conversation(self, user, user_input):
+        return self.update_conversation(user, user_input)
+    def update_conversation(self, user, user_input, conversation=None):
+        if conversation is None:
+            conversation = self.get_current_conversation(user)
+        conversation.add_user(user_input)
+        response = openai.ChatCompletion.create(
+            model='gpt-3.5-turbo',
+            messages=conversation.get_conversation())
+        content = response.choices[0]['message']['content']
+        conversation.add_assistant(content)
+        return content
     def add_conversation(self, conversation):
         if conversation.get_user() not in self.conversations:
             self.conversations[conversation.get_user()] = []    

@@ -1,4 +1,4 @@
-import openai
+from chatgpt import send_to_ChatGPT
 class Conversation:
     def __init__(self, user, system="You are a helpful AI assistant.", assistant=None, mode=lambda x: x):
         self.user = user
@@ -55,10 +55,7 @@ class ConversationManager:
         if conversation is None:
             conversation = self.get_current_conversation(user)
         conversation.add_user(user_input)
-        response = openai.ChatCompletion.create(
-            model='gpt-3.5-turbo',
-            messages=conversation.get_conversation())
-        content = response.choices[0]['message']['content']
+        content = send_to_ChatGPT(conversation.get_conversation())
         conversation.add_assistant(content)
         return content
     def add_conversation(self, conversation):

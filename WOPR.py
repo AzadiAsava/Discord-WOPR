@@ -7,6 +7,7 @@ from conversation import ConversationManager
 import json
 import wikipedia
 import asyncio
+from modes import WikipediaMode
 
 openai.api_key = os.environ.get("OpenAIAPI-Token")
 model_engine = "gpt-3.5-turbo"
@@ -45,10 +46,9 @@ def get_wiki_suggestions(topic):
         return get_wiki_summary(e.options[0])
 
 async def begin_wikipedia_conversation(user, topic, summary, channel):
-    conversation_manager.start_new_conversation(user, "Wikipedia says the following about " + topic + ": " +  summary + "\n You are a helpful AI assistant who knows everything Wikipedia said and more, so please answer any of my questions factually based on what Wikipedia says and knowing what you know.")
-    response = conversation_manager.update_current_conversation(user, "Please briefly summarize what Wikipedia said about " + topic + ", then offer to engage in a discussion on the topic as an expert.")
-    await send(channel, response)
-  
+    conversation_manager.start_new_conversation(user, "You are a helpful AI assistant who knows everything Wikipedia says and more, so please answer any of my questions factually based on what Wikipedia says and knowing what you know.", mode=WikipediaMode(user, conversation_manager))
+    response = conversation_manager.update_current_conversation(user, topic)
+    await send(channel, response)  
 
 for command in commands:
     def command_maker(system, user):
@@ -60,7 +60,7 @@ for command in commands:
         return interaction
     tree.add_command(discord.app_commands.Command(name=command["command"], description=command["description"], callback=command_maker(command["system"], command["user"])))
 
-num_map = {10: '0️⃣', 1: '1️⃣', 2: '2️⃣', 3: '3️⃣', 4: '4️⃣', 5: '5️⃣', 6: '6️⃣',7: '7️⃣',8: '8️⃣', 9: '9️⃣' }
+num_map = {10:'\u0030\ufe0f\u20e3',1:'\u0031\ufe0f\u20e3',2:'\u0032\ufe0f\u20e3',3:'\u0033\ufe0f\u20e3',4:'\u0034\ufe0f\u20e3',5:'\u0035\ufe0f\u20e3',6:'\u0036\ufe0f\u20e3',7:'\u0037\ufe0f\u20e3',8:'\u0038\ufe0f\u20e3',9:'\u0039\ufe0f\u20e3'}
 inv_map = {v: k for k, v in num_map.items()}
 
 @tree.command(name="wiki", description="Searches Wikipedia for a summary of a topic")

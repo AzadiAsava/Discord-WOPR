@@ -1,13 +1,16 @@
 import openai
 class Conversation:
-    def __init__(self, user, system="You are a helpful AI assistant.", assistant=None):
+    def __init__(self, user, system="You are a helpful AI assistant.", assistant=None, mode=lambda x: x):
         self.user = user
         self.messages = [
             {"role":"system","content":system}
         ]
         if assistant is not None:
             self.messages.append({"role":"assistant","content":assistant})
+        self.mode = mode
+
     def add_user(self, user):
+        user = self.mode(user)
         self.messages.append({"role":"user","content":user})
     def add_system(self, system):
         self.messages.append({"role":"system","content":system})
@@ -82,8 +85,8 @@ class ConversationManager:
             convo = self.conversations[user].pop(index)
             self.conversations[user].insert(0, convo)
         return self.get_current_conversation(user)
-    def start_new_conversation(self, user, system="You are a helpful AI assistant.", assistant=None):
-        convo = Conversation(user, system, assistant)
+    def start_new_conversation(self, user, system="You are a helpful AI assistant.", assistant=None, mode=lambda x : x):
+        convo = Conversation(user, system, assistant=assistant, mode=mode)
         self.add_conversation(convo)
         return convo
     

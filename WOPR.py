@@ -33,11 +33,22 @@ async def send(channel, text):
     for chunk in split_into_chunks(text):
         await channel.send(chunk)
 
-
 def get_wiki_summary(topic):
     wikipedia.set_lang("en")
     return wikipedia.summary(wikipedia.search(topic)[0])
-    
+
+def get_wiki_suggestions(topic):
+    wikipedia.set_lang("en")
+    try:
+        return get_wiki_summary(topic)
+    except wikipedia.exceptions.DisambiguationError as e:
+        return get_wiki_summary(e.options[0])
+
+async def begin_wikipedia_conversation(user, topic, summary, channel):
+    conversation_manager.start_new_conversation(user, "Wikipedia says the following about " + topic + ": " +  summary + "\n You are a helpful AI assistant who knows everything Wikipedia said and more, so please answer any of my questions factually based on what Wikipedia says and knowing what you know.")
+    response = conversation_manager.update_current_conversation(user, "Please briefly summarize what Wikipedia said about " + topic + ", then offer to engage in a discussion on the topic as an expert.")
+    await send(channel, response)
+  
 
 for command in commands:
     def command_maker(system, user):
@@ -45,10 +56,9 @@ for command in commands:
             await interaction.response.defer()
             conversation_manager.start_new_conversation(interaction.user, system)
             response = conversation_manager.update_current_conversation(interaction.user, user)
-            await interaction.followup.send(response)
+            await send(interaction.followup, response)
         return interaction
     tree.add_command(discord.app_commands.Command(name=command["command"], description=command["description"], callback=command_maker(command["system"], command["user"])))
-    
 
 num_map = {10: '0️⃣', 1: '1️⃣', 2: '2️⃣', 3: '3️⃣', 4: '4️⃣', 5: '5️⃣', 6: '6️⃣',7: '7️⃣',8: '8️⃣', 9: '9️⃣' }
 inv_map = {v: k for k, v in num_map.items()}
@@ -58,35 +68,27 @@ async def wiki_command(interaction, topic: str):
     await interaction.response.defer()
     try:
         summary = get_wiki_summary(topic)
+        await begin_wikipedia_conversation(interaction.user, topic, summary, interaction.channel)
     except wikipedia.exceptions.DisambiguationError as e:
         if len(e.options) > 10:
             e.options = e.options[:10]
-        options = ""
-        i = 1
-        for option in e.options:
-            options += str(i) + ". " + option + "\n"
-            i = i + 1
-        await interaction.followup.send("I'm not sure what you mean. Please choose one of the following options:")
-        message = await interaction.channel.send(options)
-        i = 1
-        for option in e.options:
+        options = "\n".join([f"{i}. {option}" for i, option in enumerate(e.options, start=1)])
+        await interaction.followup.send("Please choose one of the following options:")
+        message = await interaction.followup.send(options)
+        for i in range(1, len(e.options)+1):
             await message.add_reaction(num_map[i])
-            i = i + 1
         async def await_reaction(option_list):
-            reaction, user = await client.wait_for('reaction_add', check=lambda reaction, user: user == interaction.user and reaction.message == message)
+            reaction, _ = await client.wait_for('reaction_add', check=lambda reaction, user: user == interaction.user and reaction.message == message and reaction.emoji in inv_map)
+            if reaction.emoji not in inv_map:
+                return
             num = inv_map[reaction.emoji]
             option = option_list[num-1]
-            await interaction.channel.send("One moment please, consulting Wikipedia about " + option + "...")
-            summary = get_wiki_summary(option)
-            conversation_manager.start_new_conversation(interaction.user, "Wikipedia says the following about " +  option + ": " +  summary + "\n You are a helpful AI assistant who knows everything Wikipedia said and more, so please answer any of my questions factually based on what Wikipedia says and knowing what you know.")
-            response = conversation_manager.update_current_conversation(interaction.user, "Please briefly summarize what Wikipedia said about " + option + ", then offer to engage in a discussion on the topic as an expert.")
-            await send(interaction.channel, response)
+            await interaction.channel.send(f"One moment please, consulting Wikipedia about {option}...")
+            summary = get_wiki_suggestions(option)
+            await begin_wikipedia_conversation(interaction.user, option, summary, interaction.channel)
         asyncio.create_task(await_reaction(e.options))
         return
-    conversation_manager.start_new_conversation(interaction.user, "Wikipedia says the following about " + topic + ": " +  summary + "\n You are a helpful AI assistant who knows everything Wikipedia said and more, so please answer any of my questions factually based on what Wikipedia says and knowing what you know.")
-    response = conversation_manager.update_current_conversation(interaction.user, "Please briefly summarize what Wikipedia said about " + topic + ", then offer to engage in a discussion on the topic as an expert.")
-    await send(interaction.followup, response)
-
+    
 @tree.command(name = "now", description = "Displays current date and time") #Add the guild ids in which the slash command will appear. If it should be in all, remove the argument, but note that it will take some time (up to an hour) to register the command if it's for all guilds.
 async def now_command(interaction):
     now = datetime.datetime.now()

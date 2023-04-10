@@ -132,3 +132,7 @@ dmypy.json
 Scripts/
 pyvenv.cfg
 db.json
+.vscode/
+
+Scripts/
+pyvenv.cfg

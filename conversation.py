@@ -81,6 +81,15 @@ class UserPreferenceAwareMode(Mode):
         self.conversation_manager.get_current_conversation(self.user).add_system(preferences) 
         return message
 
+class KnowledgeAwareMode(Mode):
+    def __init__(self, user : int, conversation_manager : Optional["ConversationManager"] = None, knowledge_loader : lambda : str = lambda : ""):
+        super().__init__("Knowledge Aware Mode", user, conversation_manager)
+        self.knowledge_loader = knowledge_loader
+    def __call__(self, message : str) -> str:
+        if self.conversation_manager is None:
+            raise ValueError("Knowledge Aware Mode requires a conversation_manager.")
+        self.conversation_manager.get_current_conversation(self.user).add_system("Here's some things you should be aware of:\n" + self.knowledge_loader())
+        return message
 class CompoundMode(Mode):
     def __init__(self, *modes : Union[Mode, Callable]):
         super().__init__("Compound Mode")

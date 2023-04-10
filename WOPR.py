@@ -7,8 +7,8 @@ from conversation import ConversationManager
 import json
 import wikipedia
 import asyncio
-from conversation import WikipediaMode, get_wiki_suggestion, get_wiki_summary, CompoundMode, DateTimeAwareMode, UserPreferenceAwareMode
-from chatgpt import get_is_request_to_change_topics, get_new_or_existing_conversation
+from conversation import WikipediaMode, get_wiki_suggestion, get_wiki_summary, CompoundMode, KnowledgeAwareMode, DateTimeAwareMode, UserPreferenceAwareMode
+from chatgpt import get_is_request_to_change_topics, get_new_or_existing_conversation, summarize_knowledge
 from db import Database
 
 openai.api_key = os.environ.get("OpenAIAPI-Token")
@@ -96,7 +96,13 @@ time_zones = {
 
 @tree.command(name="summary", description="Get a summary of your conversations")
 async def summary_command(interaction):
-    await interaction.response.send_message(f"Summary: {conversation_manager.get_conversation_summary(interaction.user)}")
+    await interaction.response.send_message(f"Summary: {conversation_manager.get_conversation_summary(interaction.user.id)}")
+
+@tree.command(name="knowledge", description="Get a summary of your knowledge")
+async def knowledge_command(interaction):
+    await interaction.response.defer()
+    await interaction.followup.send(f"Knowledge: {summarize_knowledge(conversation_manager.get_conversation_summary(interaction.user.id))}")
+
 @tree.command(name="remember", description="Sets a preference for the AI to always remember")
 async def always_command(interaction, preference: str, value: str):
     set_preference(interaction.user.id, preference, value)
@@ -187,8 +193,8 @@ async def reload(interaction: discord.Interaction):
         def command_maker(system, user):
             async def interaction(interaction):
                 await interaction.response.defer()
-                conversation_manager.start_new_conversation(interaction.user, system)
-                response = conversation_manager.update_current_conversation(interaction.user, user)
+                conversation_manager.start_new_conversation(interaction.user.id, system)
+                response = conversation_manager.update_current_conversation(interaction.user.id, user)
                 await interaction.followup.send(response)
             return interaction
         tree.add_command(discord.app_commands.Command(name=command["command"], description=command["description"], callback=command_maker(command["system"], command["user"])))
@@ -207,20 +213,33 @@ async def on_message(message):
     if message.author.bot:
         return
     def preference_getter():
-        return get_preferences(message.author.id)    
-    if len(conversation_manager.get_conversations(message.author)) == 0:
-        conversation_manager.start_new_conversation(message.author, modes=[DateTimeAwareMode(message.author, conversation_manager=conversation_manager, timezone=get_preference(message.author, "timezone", "America/New_York")), UserPreferenceAwareMode(message.author, conversation_manager, preference_getter)])
+        return get_preferences(message.author.id)
+    knowledge_counter = 0
+    def knowledge_getter():
+        nonlocal knowledge_counter
+        if knowledge_counter >2:
+            knowledge_counter = 0
+            db.set_knowledge(message.author.id, summarize_knowledge(conversation_manager.get_conversation_summary(message.author.id)))
+        knowledge_counter += 1
+        return db.get_knowledge(message.author.id)
+    modes = [
+        DateTimeAwareMode(message.author.id, conversation_manager=conversation_manager, timezone=get_preference(message.author.id, "timezone", "America/New_York")),
+        UserPreferenceAwareMode(message.author.id, conversation_manager, preference_getter),
+        KnowledgeAwareMode(message.author.id, conversation_manager, knowledge_getter)
+    ]
+    if len(conversation_manager.get_conversations(message.author.id)) == 0:
+        conversation_manager.start_new_conversation(message.author.id, modes=modes)
     else:
-        topic_change = get_is_request_to_change_topics(conversation_manager.get_current_conversation(message.author).summary, message.content)
+        topic_change = get_is_request_to_change_topics(conversation_manager.get_current_conversation(message.author.id).summary, message.content)
         if topic_change:
-            conversation = get_new_or_existing_conversation(conversation_manager.get_conversation_summary(message.author), message.content)
+            conversation = get_new_or_existing_conversation(conversation_manager.get_conversation_summary(message.author.id), message.content)
             if conversation == -1:
-                conversation_manager.start_new_conversation(message.author, modes=[CompoundMode(DateTimeAwareMode(message.author, conversation_manager=conversation_manager, timezone=get_preference(message.author, "timezone", "America/New_York")), UserPreferenceAwareMode(message.author, conversation_manager, preference_getter))])
+                conversation_manager.start_new_conversation(message.author.id, modes=modes)
             elif conversation == 0:
                 pass
             else:
-                conversation_manager.switch_to_conversation(message.author, conversation)
-    content = conversation_manager.update_current_conversation(message.author, message.content)
+                conversation_manager.switch_to_conversation(message.author.id, conversation)
+    content = conversation_manager.update_current_conversation(message.author.id, message.content)
     await message.channel.send(content)
       
 token = os.environ.get("Discord-Token", None)

@@ -78,31 +78,16 @@ class Database:
         else:
             return self.get_conversation(user_id, self.db.search(self.query.user_id == user_id).get("current_conversation", None))
     
-    def get_knowledge(self, user_id) -> Optional[dict]:
+    def get_knowledge(self, user_id) -> str:
         query = Query()
         if not self.knowledge.contains(query.user_id == user_id):
-            return {}
+            return ""
         else:
             return self.knowledge.search(query.user_id == user_id)[0].get("knowledge", {})
         
-    def get_knowledge_item(self, user_id, knowledge_name, default=None) -> Optional[str]:
-        return self.get_knowledge(user_id).get(knowledge_name, default)
-    
-    def set_knowledge_item(self, user_id, knowledge_name, knowledge_value):
+    def set_knowledge(self, user_id, knowledge: str):
         query = Query()
         if not self.knowledge.contains(query.user_id == user_id):
-            self.knowledge.insert({"user_id": user_id, "knowledge": {knowledge_name: knowledge_value}})
+            self.knowledge.insert({"user_id": user_id, "knowledge": knowledge})
         else:
-            knowledge = self.knowledge.search(query.user_id == user_id)[0].get("knowledge", {})
-            knowledge[knowledge_name] = knowledge_value
             self.knowledge.update({"knowledge": knowledge}, query.user_id == user_id)
-    
-    def delete_knowledge_item(self, user_id, knowledge_name):
-        query = Query()
-        if not self.knowledge.contains(query.user_id == user_id):
-            return
-        else:
-            knowledge = self.knowledge.search(query.user_id == user_id)[0].get("knowledge", {})
-            del knowledge[knowledge_name]
-            self.knowledge.update({"knowledge": knowledge}, query.user_id == user_id)
-    

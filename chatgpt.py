@@ -56,3 +56,11 @@ def get_new_or_existing_conversation(old_conversations, user_input):
     if number is None:
         return -1
     return int(number.group(0))
+
+def summarize_knowledge(conversation_summary: str) -> str:
+    convo = [
+        {"role":"system","content":"You are a helpful AI assistant who knows how to summarize a series of conversations into a knowledge base. I will supply you with a list of summaries of prior conversations we have had, and I want you to write a paragraph or three containing the key datapoints from all the conversations. Make sure to include key datapoints from all the conversations."},
+        {"role":"system","content":"Here are the summaries of prior conversations:\n" + conversation_summary},
+        {"role":"user","content":"What is the knowledge base of our prior conversations? Please write a paragraph or three containing the key datapoints from all the conversations. Make sure to include key datapoints from all the conversations."}
+    ]
+    return send_to_ChatGPT(convo).replace('"', '').replace("'", "").rstrip().lstrip()

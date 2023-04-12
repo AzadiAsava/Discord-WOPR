@@ -1,15 +1,16 @@
+import asyncio
+import datetime
+from typing import Optional
 import discord
 from discord import app_commands, SelectMenu, SelectOption
-import datetime
 import openai
 import os
-from conversation import ConversationManager
+from conversation import ConversationManager, compress_conversation
 import json
-import wikipedia
-import asyncio
-from conversation import WikipediaMode, get_wiki_suggestion, get_wiki_summary, CompoundMode, KnowledgeAwareMode, DateTimeAwareMode, UserPreferenceAwareMode
-from chatgpt import get_is_request_to_change_topics, get_new_or_existing_conversation, summarize_knowledge
+from conversation import get_wiki_summary, KnowledgeAwareMode, DateTimeAwareMode, UserPreferenceAwareMode
+from chatgpt import get_is_request_to_change_topics, get_new_or_existing_conversation, merge_conversations, summarize, summarize_knowledge, find_similar_conversations
 from db import Database
+import wikipedia
 
 openai.api_key = os.environ.get("OpenAIAPI-Token")
 model_engine = "gpt-3.5-turbo"
@@ -21,10 +22,17 @@ client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 conversation_manager = ConversationManager(db)
 
-
 commands = json.load(open("commands.json", "r"))
 
-def get_preference(user, preference, default="") -> str:
+def get_default_modes(user):
+    modes = [
+        DateTimeAwareMode(user),
+        UserPreferenceAwareMode(user),
+        KnowledgeAwareMode(user)
+    ]
+    return modes
+
+def get_preference(user, preference, default="") -> Optional[str]:
     return db.get_preference(user, preference, default)
 
 def get_preferences(user: int) -> dict:
@@ -50,10 +58,8 @@ async def send(channel, text):
         await channel.send(chunk)
 
 async def begin_wikipedia_conversation(user, topic, channel):
-    def preference_getter():
-        return get_preferences(user)
-    conversation_manager.start_new_conversation(user, "You are a helpful AI assistant who knows everything Wikipedia says and more, so please answer any of my questions factually based on what Wikipedia says and knowing what you know.", modes=CompoundMode(WikipediaMode(user, conversation_manager), DateTimeAwareMode(user, conversation_manager, get_preference(user, "timezone")), UserPreferenceAwareMode(user, conversation_manager, preference_getter)))
-    response = conversation_manager.update_current_conversation(user, topic)
+    conversation_manager.start_new_conversation(user, "You are a helpful AI assistant who knows everything Wikipedia says and more, so please answer any of my questions factually based on what Wikipedia says and knowing what you know.", modes=get_default_modes(user)) 
+    response = await conversation_manager.update_current_conversation(user, topic)
     await send(channel, response)  
 
 for command in commands:
@@ -102,6 +108,36 @@ async def summary_command(interaction):
 async def knowledge_command(interaction):
     await interaction.response.defer()
     await interaction.followup.send(f"Knowledge: {summarize_knowledge(conversation_manager.get_conversation_summary(interaction.user.id))}")
+
+@tree.command(name="similar", description="Get a summary of your similar conversations")
+async def similar_command(interaction):
+    await interaction.response.defer()
+    await interaction.followup.send(find_similar_conversations(conversation_manager.get_conversation_summary(interaction.user.id)))
+
+@tree.command(name="compress", description="Compresses your conversations")
+async def compress_command(interaction):
+    await interaction.response.defer()
+    conversations = list(conversation_manager.get_conversations(interaction.user.id).values())
+    for conversation in conversations:
+        await compress_conversation(conversation)
+        conversation_manager.set_conversation(interaction.user.id, conversation)
+    await interaction.followup.send(f"Compressed conversations: {len(conversations)}")
+        
+
+@tree.command(name="merge", description="Merge two conversations")
+async def merge_command(interaction, c1: int, c2: int):
+    await interaction.response.defer()
+    async def merge():
+        conversations = list(conversation_manager.get_conversations(interaction.user.id).values())
+        first_conversation = conversations[c1]
+        second_conversation = conversations[c2]
+        merged = await merge_conversations(str(first_conversation), str(second_conversation))
+        first_conversation.messages = merged
+        first_conversation.summary = summarize(str(first_conversation))
+        conversation_manager.set_conversation(interaction.user.id, first_conversation)
+        conversation_manager.delete_conversation(interaction.user.id, second_conversation)
+        await interaction.followup.send(f"Merged conversations {c1} and {c2}")
+    asyncio.create_task(merge())
 
 @tree.command(name="remember", description="Sets a preference for the AI to always remember")
 async def always_command(interaction, preference: str, value: str):
@@ -175,7 +211,7 @@ async def shab_command(interaction):
     nowstr = now.strftime('%m-%d-%Y-%H:%M:%S')
     prompt = 'The current date is' + nowstr  + '. You are a sophisticated language model capable of calculating the candle-lighting time and havdalah times for this coming Shabbat (Jewish Sabbath) in New York City. Candle lighting time is 18 minutes prior to sunset, and havdalah is at the time that three stars are visible in the night sky. Please display the output in the following format: On Friday, [date of upcoming erev Shabbat], Shabbat candle-lighting time will be at [time]. Havdalah time will be at [time] on Saturday, [date of the end of the upcoming Shabbat]." Please only display the requested format.'
     conversation_manager.start_new_conversation(interaction.user, prompt)
-    response = conversation_manager.update_current_conversation(interaction.user, "Go ahead and start by giving me the candle-lighting time and havdalah times for this coming Shabbat (Jewish Sabbath) in New York City.")
+    response = await conversation_manager.update_current_conversation(interaction.user, "Go ahead and start by giving me the candle-lighting time and havdalah times for this coming Shabbat (Jewish Sabbath) in New York City.")
     await interaction.followup.send(response)
 
 @tree.command(name='sync', description='Owner only')
@@ -194,7 +230,7 @@ async def reload(interaction: discord.Interaction):
             async def interaction(interaction):
                 await interaction.response.defer()
                 conversation_manager.start_new_conversation(interaction.user.id, system)
-                response = conversation_manager.update_current_conversation(interaction.user.id, user)
+                response = await conversation_manager.update_current_conversation(interaction.user.id, user)
                 await interaction.followup.send(response)
             return interaction
         tree.add_command(discord.app_commands.Command(name=command["command"], description=command["description"], callback=command_maker(command["system"], command["user"])))
@@ -212,36 +248,24 @@ async def on_message(message):
         return
     if message.author.bot:
         return
-    def preference_getter():
-        return get_preferences(message.author.id)
-    knowledge_counter = 0
-    def knowledge_getter():
-        nonlocal knowledge_counter
-        if knowledge_counter >2:
-            knowledge_counter = 0
-            db.set_knowledge(message.author.id, summarize_knowledge(conversation_manager.get_conversation_summary(message.author.id)))
-        knowledge_counter += 1
-        return db.get_knowledge(message.author.id)
-    modes = [
-        DateTimeAwareMode(message.author.id, conversation_manager=conversation_manager, timezone=get_preference(message.author.id, "timezone", "America/New_York")),
-        UserPreferenceAwareMode(message.author.id, conversation_manager, preference_getter),
-        KnowledgeAwareMode(message.author.id, conversation_manager, knowledge_getter)
-    ]
-    if len(conversation_manager.get_conversations(message.author.id)) == 0:
-        conversation_manager.start_new_conversation(message.author.id, modes=modes)
-    else:
-        topic_change = get_is_request_to_change_topics(conversation_manager.get_current_conversation(message.author.id).summary, message.content)
-        if topic_change:
-            conversation = get_new_or_existing_conversation(conversation_manager.get_conversation_summary(message.author.id), message.content)
-            if conversation == -1:
-                conversation_manager.start_new_conversation(message.author.id, modes=modes)
-            elif conversation == 0:
-                pass
-            else:
-                conversation_manager.switch_to_conversation(message.author.id, conversation)
-    content = conversation_manager.update_current_conversation(message.author.id, message.content)
-    await message.channel.send(content)
-      
+    async def handle_request():
+        modes = get_default_modes(message.author.id)
+        if len(conversation_manager.get_conversations(message.author.id)) == 0:
+            conversation_manager.start_new_conversation(message.author.id, modes=modes)
+        else:
+            topic_change = await get_is_request_to_change_topics(conversation_manager.get_current_conversation(message.author.id).summary, message.content)
+            if topic_change:
+                conversation = await get_new_or_existing_conversation(conversation_manager.get_conversation_summary(message.author.id), message.content)
+                if conversation == -1:
+                    conversation_manager.start_new_conversation(message.author.id, modes=modes)
+                elif conversation == 0:
+                    pass
+                else:
+                    conversation_manager.switch_to_conversation(message.author.id, conversation)
+        content = await conversation_manager.update_current_conversation(message.author.id, message.content)
+        await send(message.channel, content)
+    asyncio.create_task(handle_request())
+
 token = os.environ.get("Discord-Token", None)
 if token is None:
     raise ValueError("No Discord token found in the environment variables. Please set the environment variable 'Discord-Token' to your Discord bot token.")

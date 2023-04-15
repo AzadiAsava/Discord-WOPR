@@ -7,3 +7,4 @@ tinydb>=4.5.2
 pytz>=2023.3
 jsonpickle>=3.0.1
 nltk>=3.8.1
+tinydb_serialization>=2.1.0

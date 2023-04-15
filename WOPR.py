@@ -5,7 +5,7 @@ import discord
 from discord import app_commands, SelectMenu, SelectOption
 import openai
 import os
-from conversation import ConversationManager, compress_conversation
+from conversation import ConversationManager, DatasourceAwareMode, compress_conversation
 import json
 from conversation import get_wiki_summary, KnowledgeAwareMode, DateTimeAwareMode, UserPreferenceAwareMode
 from chatgpt import get_is_request_to_change_topics, get_new_or_existing_conversation, merge_conversations, summarize, summarize_knowledge, find_similar_conversations
@@ -28,7 +28,8 @@ def get_default_modes(user):
     modes = [
         DateTimeAwareMode(user),
         UserPreferenceAwareMode(user),
-        KnowledgeAwareMode(user)
+        KnowledgeAwareMode(user),
+        DatasourceAwareMode(user),
     ]
     return modes
 
@@ -102,24 +103,24 @@ time_zones = {
 
 @tree.command(name="summary", description="Get a summary of your conversations")
 async def summary_command(interaction):
-    await interaction.response.send_message(f"Summary: {conversation_manager.get_conversation_summary(interaction.user.id)}")
+    await interaction.response.send_message(conversation_manager.get_conversation_summary(interaction.user.id))
 
 @tree.command(name="knowledge", description="Get a summary of your knowledge")
 async def knowledge_command(interaction):
     await interaction.response.defer()
-    await interaction.followup.send(f"Knowledge: {summarize_knowledge(conversation_manager.get_conversation_summary(interaction.user.id))}")
+    await interaction.followup.send(summarize_knowledge(conversation_manager.get_conversation_summary(interaction.user.id)))
 
 @tree.command(name="similar", description="Get a summary of your similar conversations")
 async def similar_command(interaction):
     await interaction.response.defer()
-    await interaction.followup.send(find_similar_conversations(conversation_manager.get_conversation_summary(interaction.user.id)))
+    await interaction.followup.send(await find_similar_conversations(conversation_manager.get_conversation_summary(interaction.user.id)) or "No similar conversations found.")
 
 @tree.command(name="compress", description="Compresses your conversations")
 async def compress_command(interaction):
     await interaction.response.defer()
     conversations = list(conversation_manager.get_conversations(interaction.user.id).values())
     for conversation in conversations:
-        await compress_conversation(conversation)
+        conversation = await compress_conversation(conversation)
         conversation_manager.set_conversation(interaction.user.id, conversation)
     await interaction.followup.send(f"Compressed conversations: {len(conversations)}")
         
@@ -133,7 +134,7 @@ async def merge_command(interaction, c1: int, c2: int):
         second_conversation = conversations[c2]
         merged = await merge_conversations(str(first_conversation), str(second_conversation))
         first_conversation.messages = merged
-        first_conversation.summary = summarize(str(first_conversation))
+        first_conversation.summary = await summarize(str(first_conversation))
         conversation_manager.set_conversation(interaction.user.id, first_conversation)
         conversation_manager.delete_conversation(interaction.user.id, second_conversation)
         await interaction.followup.send(f"Merged conversations {c1} and {c2}")

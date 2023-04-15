@@ -1,8 +1,9 @@
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 import openai
 import os
 import re
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
+import yaml
 
 # Create an instance of the SentimentIntensityAnalyzer object
 analyzer = SentimentIntensityAnalyzer()
@@ -26,8 +27,15 @@ async def extract_topic(message : str) -> str:
 
 async def summarize(conversation: str) -> str:
     convo = [
-        {"role":"system","content":"You are a helpful AI assistant who knows how to summarize a conversation. I will supply you with a conversation, and I want you to tell me, in quotes, a summary of the conversation. Please supply only the summary in quotes. For example, if I say 'I want to summarize this conversation', you should say 'This conversation is about a topic.' and nothing else."},
-        {"role":"user","content":"What is the summary of this conversation? \"" + conversation + "\" Please only supply the summary in quotes. Make sure to include the quotes and nothing else except the summary in quotes."}
+        {"role":"system","content":"You are a helpful AI assistant who knows how to create detailed summaries of content. I will supply you with some content, and I want you to tell me, in quotes, a summary of the conversation. Please supply as many important details in the summary as you can."},
+        {"role":"user","content":"What is a highly detailed summary of this content? \"" + str(conversation)[:3000] + "\" Please only supply the summary in quotes. Make sure to include the quotes and nothing else except the summary in quotes."}
+    ]
+    return (await send_to_ChatGPT(convo)).replace('"', '').replace("'", "").rstrip().lstrip()
+
+async def summarize_data(data: str) -> str:
+    convo = [
+        {"role":"system","content":"You are a helpful AI assistant who knows how to create detailed summaries of content. I will supply you with some content, and I want you to tell me, in quotes, a summary of the conversation. Please supply as many important details in the summary as you can."},
+        {"role":"user","content":"What is a highly detailed summary of this content? \"" + data[:3000] + "\" Please only supply the summary in quotes. Make sure to include the quotes and nothing else except the summary in quotes."}
     ]
     return (await send_to_ChatGPT(convo)).replace('"', '').replace("'", "").rstrip().lstrip()
 
@@ -93,3 +101,35 @@ async def merge_conversations(conversation1 : str, conversation2 : str) -> list[
     print(result)
     result = [ {"role":x[0].strip().lower(), "content":x[1].strip()} for x in [ x.split(":") for x in result.split("\n") if x.strip() != "" and ":" in x and ("assistant" in x.lower() or "user" in x.lower() or "system" in x.lower()) ] ]
     return result
+
+async def get_wolfram_query(query : str) -> str:
+    convo = [
+        {"role":"system","content":"You are a helpful AI assistant capable of converting conversatioal summaries and follow up questions into a query suitible for Wolfram Alpha."},
+        {"role":"user","content":query}
+    ]
+    return (await send_to_ChatGPT(convo)).replace('"', '').replace("'", "").rstrip().lstrip()
+
+async def extract_urls(query : str) -> List[dict[str,str]]:
+    convo = [
+        {"role":"system","content":"You are a helpful ai assistant who knows how to given a message, guess the url i should be querying, and make a good query for that specific url as to what I should search it for. You will take the message i give you, and you will tell me what url i should query, and what query I should search that url for given that message. Remember to take into account the nature of the website when answering the question."},
+        {"role":"user","content":f"Your first example is, \"{query}\" What is the url of the company or brand mentioned there, or what urls might be relevant what is being discussed, ignoring any questions or statements that don't make sense, and what should i query them for specifically in quotes? I just want the url and the query, please dont mention what I should not search for or the reasoning. Do NOT put the url in quotes, as that will only confuse me. Format your response in yaml, with an array of NAME, URL and QUERY pairs."}         
+    ]
+    result = (await send_to_ChatGPT(convo)).replace('"', '').replace("'", "").rstrip().lstrip()
+    
+    try:
+        result = result.split("```")[1]
+        if result.lower().startswith("yaml"):
+            result = result[4:]
+        result = yaml.load(result, Loader=yaml.Loader)
+        output = []
+        for i in result:
+            out = {"context":query}
+            for k, v in i.items():
+                value = v.replace('"', '').replace("'", "").rstrip().lstrip().replace("\\", "")
+                if "site:" in value:
+                    value = value[:value.index("site:")].strip()
+                out[k.lower()] = value
+            output.append(out)
+        return output
+    except:
+        return []

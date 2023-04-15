@@ -34,7 +34,7 @@ class Database:
         else:
             return self.preferences.search(query.user_id == user_id)[0].get("preferences", {})
         
-    def get_preference(self, user_id, preference_name, default=None) -> Optional[str]:
+    def get_preference(self, user_id, preference_name, default=None) -> str:
         return self.get_preferences(user_id).get(preference_name, default)
     
     def set_preference(self, user_id, preference_name, preference_value):

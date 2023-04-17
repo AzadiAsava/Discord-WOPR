@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import AsyncGenerator, Callable, Generator, List, Optional, Tuple
 import openai
 import os
 import re
@@ -28,7 +28,7 @@ async def extract_topic(message : str) -> str:
 async def summarize(conversation: str) -> str:
     convo = [
         {"role":"system","content":"You are a helpful AI assistant who knows how to create detailed summaries of content. I will supply you with some content, and I want you to tell me, in quotes, a summary of the conversation. Please supply as many important details in the summary as you can."},
-        {"role":"user","content":"What is a highly detailed summary of this content? \"" + str(conversation)[:3000] + "\" Please only supply the summary in quotes. Make sure to include the quotes and nothing else except the summary in quotes."}
+        {"role":"user","content":"What is a highly detailed summary of this content? \"" + conversation[:3000] + "\" Please only supply the summary in quotes. Make sure to include the quotes and nothing else except the summary in quotes."}
     ]
     return (await send_to_ChatGPT(convo)).replace('"', '').replace("'", "").rstrip().lstrip()
 
@@ -43,7 +43,7 @@ def is_positive(message : str) -> bool:
     scores = analyzer.polarity_scores(message)
     return scores['compound'] > 0
 
-async def get_is_request_to_change_topics(context, user_input : str) -> bool:
+async def get_is_request_to_change_topics(context : str, user_input : str) -> bool:
     convo = [
         {"role":"system","content":"You are a helpful AI assistant who knows how to identify if a sententce is a request to to talk about something were already discussing, or a change in topics. I will supply you with a sentence, and I want you to tell me, in quotes, if this is a request to change topics or not. Please supply an explnation for your answer. For example, if I say 'Can we talk about my dog instead?', you should say 'yes because it's asking to talk about a dog instead of the current topic', but if I say something context free, or related to what i was previously discussing, you should say 'no its on topic' and nothing else."},
         {"role":"system","content":"Previously I was talking about: " + context},
@@ -52,7 +52,7 @@ async def get_is_request_to_change_topics(context, user_input : str) -> bool:
     result = (await send_to_ChatGPT(convo)).replace('"', '').replace("'", "").rstrip().lstrip()
     return is_positive(result)
 
-async def get_new_or_existing_conversation(old_conversations, user_input):
+async def get_new_or_existing_conversation(old_conversations : str, user_input : str):
     convo = [
         {"role":"system","content":"You are a helpful AI assistant who knows how to identify if a question is related to a prior conversation, or if it is a new conversation. I will supply you with a conversation, and I want you to tell me, in quotes, if this is a new conversation or if it is related to a prior conversation. Please supply only the prior conversatyion in quotes, or say 'new conversation' if this is a new conversation. For example, if I say 'I want to know if this is a new conversation or related to a prior conversation', you should say 'new conversation' or 'The prior conversation about prior conversations.' and nothing else."},
         {"role":"system","content":"Here are the prior conversations:\n" + old_conversations},
@@ -105,7 +105,7 @@ async def merge_conversations(conversation1 : str, conversation2 : str) -> list[
 async def get_wolfram_query(query : str) -> str:
     convo = [
         {"role":"system","content":"You are a helpful AI assistant capable of converting conversatioal summaries and follow up questions into a query suitible for Wolfram Alpha."},
-        {"role":"user","content":query}
+        {"role":"user","content":"Please convert the following into a query suitible for sending to WolframAlpha: " + query}
     ]
     return (await send_to_ChatGPT(convo)).replace('"', '').replace("'", "").rstrip().lstrip()
 
@@ -133,3 +133,56 @@ async def extract_urls(query : str) -> List[dict[str,str]]:
         return output
     except:
         return []
+    
+async def extract_datasource(query : str) -> Optional[dict[str,str]]:
+    convo = [
+        {"role":"system","content":"You are a software engineer responsible for designing a web API interface based on a plain text description. Your goal is to take a description of a web API, including its URL and endpoints, and create a YAML map that includes all the relevant parameters specified. For example, if you were given the following plain text description: \"I have an API for searching Google at google.com, and it has a search API at /search which takes a query parameter q and returns results in JSON format\", your output would be a YAML map that includes the following information:\n```yaml\nurl: \"https://google.com\"\nendpoints:\n  - path: \"/search\"\n    method: \"GET\"\n    query_params:\n      - name: \"q\"\n        required: true\n    response_format: \"json\"\n```\n"},
+        {"role":"user","content":f"Your first example is, \"{query}\" Please write a YAML map for this datasource."}
+    ]
+    result = (await send_to_ChatGPT(convo)).replace('"', '').replace("'", "").rstrip().lstrip()
+    try:
+        result = result.split("```")[1]
+        if result.lower().startswith("yaml"):
+            result = result[4:]
+        result = yaml.load(result, Loader=yaml.Loader)
+        out = {"context":query}
+        for k, v in result.items():
+            value = v.replace('"', '').replace("'", "").rstrip().lstrip().replace("\\", "")
+            if "site:" in value:
+                value = value[:value.index("site:")].strip()
+            out[k.lower()] = value
+        return out
+    except:
+        return None
+
+async def classify_intent(categories : List[str], query : str) -> int:
+    convo = [
+        {"role": "system", "content": "You are a classification agent that knows how to classify text into one of a list of options listed, or \"0. None of the above.\" if it doesnt match any of the listed options. Here's the list of possible options:"},
+        ] + [{"role": "user", "content": f"{i}. {j}"} for i, j in enumerate(categories)] + \
+        [{"role": "user", "content": f'Please classify this as one of the above options listed: "{query}"'}]
+    result = await send_to_ChatGPT(convo)
+    try:
+        return int(re.findall(r"\d+", result)[0])
+    except:
+        return -1
+
+async def extract_preferences(message) -> dict[str,str]:
+    convo = [
+        {"role":"system","content":"You are a helpful AI assistant capable of taking a message and extracting a key/value set of preferences and giving the value back as YAML."},
+        {"role":"system","content":"""For example, if I were to say to you, "Remember to always call me Sir, and my Birthday is 10/10/1990" you would say:
+        ```yaml
+         "My name": "Sir"
+         "My birthday": "10/10/1990"
+         "Always call me": "Sir"
+        ```"""},
+        {"role":"user","content":"Please convert the following into a YAML map of preferences: " + message}
+    ]
+    result = (await send_to_ChatGPT(convo))
+    try:
+        result = result.split("```")[1]
+        if result.lower().startswith("yaml"):
+            result = result[4:]
+        result = yaml.load(result, Loader=yaml.Loader)
+        return result
+    except:
+        return {}

@@ -8,7 +8,7 @@ import os
 from conversation import ConversationManager, DatasourceAwareMode, compress_conversation
 import json
 from conversation import get_wiki_summary, KnowledgeAwareMode, DateTimeAwareMode, UserPreferenceAwareMode
-from chatgpt import get_is_request_to_change_topics, get_new_or_existing_conversation, merge_conversations, summarize, summarize_knowledge, find_similar_conversations
+from chatgpt import extract_datasource, get_is_request_to_change_topics, get_new_or_existing_conversation, merge_conversations, summarize, summarize_knowledge, find_similar_conversations
 from db import Database
 import wikipedia
 
@@ -44,6 +44,18 @@ def set_preference(user : int, preference, value) -> None:
 
 def remove_preference(user, preference):
     db.delete_preference(user, preference)
+
+def set_datasource(user, datasource):
+    db.set_datasource(user, datasource)
+
+def get_datasource(user, name):
+    return db.get_datasource(user, name)
+
+def get_datasources(user):
+    return db.get_datasources(user)
+
+def delete_datasource(user, name):
+    db.delete_datasource(user, name)
 
 def split_into_chunks(text, chunk_size=2000):
     chunks = []
@@ -100,6 +112,16 @@ time_zones = {
     "Australia/Brisbane": "Australian Eastern Standard Time (UTC+10)",
     "Pacific/Auckland": "New Zealand Standard Time (UTC+12)"
 }
+
+@tree.command(name="adddatasource", description="Add a data source")
+async def add_datasource_command(interaction, description: str):
+    await interaction.response.defer()
+    ds = await extract_datasource(description)
+    if ds is None:
+        await interaction.followup.send("No data source found")
+        return
+    await interaction.followup.send(f"Added data source {ds.get('name') or ds.get('url')}")
+    set_datasource(interaction.user.id, ds)
 
 @tree.command(name="summary", description="Get a summary of your conversations")
 async def summary_command(interaction):

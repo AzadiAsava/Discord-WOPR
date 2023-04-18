@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Any, List, Optional, Type, Union
-from chatgpt import classify_intent, get_new_or_existing_conversation
+from chatgpt import classify_intent, get_new_or_existing_conversation, remove_change_of_topic
 from dto import Message, Conversation
 from abc import abstractmethod
 from db import Database
@@ -116,6 +116,7 @@ class MessageHandler:
             for action in actions:
                 await action(message, database, interaction.followup)
         except ConversationChangeException:
+            message.text = await remove_change_of_topic(message.text)
             await self.handle_message(message, database, interaction.followup)
 
     async def handle_message(self, message: Message, database : Database, sendable : Sendable):
@@ -126,6 +127,7 @@ class MessageHandler:
             for action in actions:
                 await action(message, database, sendable)
         except ConversationChangeException:
+            message.text = await remove_change_of_topic(message.text)
             await self.handle_message(message, database, sendable)
 
     async def send_conversation_for_completion(self, message: Message, database: Database, sendable: Sendable):

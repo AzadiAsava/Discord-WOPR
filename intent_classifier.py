@@ -1,11 +1,12 @@
 from dataclasses import dataclass
 from typing import Any, List, Optional, Type, Union
-from chatgpt import classify_intent, get_new_or_existing_conversation, remove_change_of_topic
+from chatgpt import classify_intent, extract_preferences, get_new_or_existing_conversation, remove_change_of_topic
 from dto import Message, Conversation
 from abc import abstractmethod
 from db import Database
 import discord
 import chatgpt
+from chatgpt import summarize
 
 Sendable = Union[discord.Webhook, discord.abc.Messageable]
 
@@ -30,7 +31,15 @@ class ConversationCompletionAction(Action):
         conversation.add_assistant(completion)
         database.set_conversation(message.user, conversation)
         await sendable.send(completion)
-
+class ConversationSummaryAction(Action):
+    def __init__(self):
+        super().__init__("Conversation Summary Action", "Set a summary of the current conversation on it.")
+    async def __call__(self, message : Message, database : Database, sendable : Sendable) -> None:
+        conversation = database.get_current_conversation(message.user)
+        if conversation is None:
+            return
+        conversation.summary = await summarize(str(conversation))
+        database.set_conversation(message.user, conversation)
 class ConversationChangeException(Exception):
     pass
 class ChangeCurrentConversationAction(Action):
@@ -62,6 +71,21 @@ class ChangeCurrentConversationAction(Action):
                 raise ConversationChangeException
         except:
             return
+
+class RememberAction(Action):
+    def __init__(self): 
+        super().__init__("Remember Action", "An explicit request to remember something or keep something in mind for later.")
+    async def __call__(self, message : Message, database : Database, sendable : Sendable) -> None:
+        preference = await extract_preferences(message.text)
+        if preference is None:
+            await sendable.send("I don't understand what you're asking me to remember.")
+            return
+        for k, v in preference.items():
+            database.set_preference(message.user, k, v)
+            await sendable.send(f"{k} is now {v}.")
+        response = await chatgpt.get_completion([{"role":"system","content":"You are a helpful assistant."},{"role":"user","content":"I need a response to this that says I will remember these things: \n" + str(message.text) + "\nPlease blockquote the reply as a YAML blockquote starting with ```yaml\n```"}])
+        await sendable.send(response.split("```yaml")[1].split("```")[0])
+
 @dataclass
 class Intent:
     name:str
@@ -79,7 +103,7 @@ class TopicChangeIntent(Intent):
     def __init__(self):
         pass
     def get_actions(self, message: Message) -> List[Action]:
-        return [ChangeCurrentConversationAction(), ConversationCompletionAction()]
+        return [ChangeCurrentConversationAction(), ConversationCompletionAction(), ConversationSummaryAction()]
 class NoOpIntent(Intent):
     name:str = "NoOp Intent"
     description:str = "None of the above"
@@ -87,11 +111,19 @@ class NoOpIntent(Intent):
         pass
     @staticmethod
     def get_actions(message: Message) -> List[Action]:
-        return [ConversationCompletionAction()]
+        return [ConversationCompletionAction(), ConversationSummaryAction()]
 
-class Pleasantry(NoOpIntent):
+class PleasantryIntent(NoOpIntent):
     name:str = "Pleasantry Intent"
     description:str = "Just a greeting, affirmation, platitude, or pleasantry and nothing more."
+
+class RememberIntent(Intent):
+    name:str = "Remember Intent"
+    description:str = "An explicit request to remember something."
+    def __init__(self):
+        pass
+    def get_actions(self, message: Message) -> List[Action]:
+        return [RememberAction()]
 
 class IntentClassifier:
     async def classify_intent(self, message : Message) -> Type[Intent]:

@@ -171,7 +171,6 @@ async def extract_datasource(query : str) -> Optional[dict[str,str]]:
     except:
         return None
 
-@tries(3)
 async def classify_intent(categories : List[str], query : str, context: str) -> int:
     convo = [ 
         {"role":"assistant", "content": "For context: " + context},

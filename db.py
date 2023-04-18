@@ -46,14 +46,14 @@ class Database:
     def get_preference(self, user_id, preference_name, default=None) -> str:
         return self.get_preferences(user_id).get(preference_name, default)
     
-    def set_preference(self, user_id, preference_name, preference_value):
+    def set_preference(self, user : UserUnion, preference_name, preference_value):
         query = Query()
-        if not self.preferences.contains(query.user_id == user_id):
-            self.preferences.insert({"user_id": user_id, "preferences": {preference_name: preference_value}})
+        if not self.preferences.contains(query.user_id == str(user.id)):
+            self.preferences.insert({"user_id": str(user.id), "preferences": {preference_name: preference_value}})
         else:
-            preferences = self.preferences.search(query.user_id == user_id)[0].get("preferences", {})
+            preferences = self.preferences.search(query.user_id == str(user.id))[0].get("preferences", {})
             preferences[preference_name] = preference_value
-            self.preferences.update({"preferences": preferences}, query.user_id == user_id)
+            self.preferences.update({"preferences": preferences}, query.user_id == str(user.id))
 
     def delete_preference(self, user_id, preference_name):
         query = Query()
@@ -94,11 +94,8 @@ class Database:
 
     def get_conversations(self, user : UserUnion) -> List[Conversation]:
         query = Query()
-        if not self.conversations.contains(query.user_id == str(user.id)):
-            return []
-        else:
-            result = self.conversations.search(query.user_id == str(user.id))
-            return [r.get("conversation", None) for r in result]
+        result = self.conversations.search(query.user_id == str(user.id))
+        return [r.get("conversation", None) for r in result]
     
     def get_conversation(self, user : UserUnion, conversation_id : str) -> Optional[Conversation]:
         result = self.conversations.get(get_conversation_query(user, conversation_id))
@@ -106,28 +103,21 @@ class Database:
             return None
         return result.get("conversation", None)    
     def set_conversation(self, user: UserUnion, conversation : Conversation):
-        query = Query()
-        if not self.conversations.contains(get_conversation_query(user, conversation.id)):
-            self.conversations.insert(UserConversation(user_id=str(user.id), conversation=conversation).__dict__)
-        else:
-            self.conversations.update(UserConversation(user_id=str(user.id), conversation=conversation).__dict__, get_conversation_query(user, conversation.id))
+        self.conversations.upsert(UserConversation(user_id=str(user.id), conversation=conversation).__dict__, get_conversation_query(user, conversation.id))
 
     def delete_conversation(self, user: UserUnion, conversation_id : str):
         return self.conversations.remove(get_conversation_query(user, conversation_id))
 
     def set_current_conversation(self, user: UserUnion, conversation : Conversation):
         query = Query()
-        if not self.current_conversation.contains(get_conversation_query(user, conversation.id)):
-            self.current_conversation.insert({"user_id":str(user.id), "conversation_id": conversation.id})
-        else:
-            self.db.update({"user_id":str(user.id), "conversation_id": conversation.id}, query.user_id == str(user.id))
+        self.db.upsert({"user_id":str(user.id), "conversation_id": conversation.id}, query.user_id == str(user.id))
 
     def get_current_conversation(self, user : User) -> Optional[Conversation]:
         query = Query()
-        if not self.db.contains(query.user_id == user.id):
+        if not self.db.contains(query.user_id == str(user.id)):
             return None
         else:
-            conversation_id = self.current_conversation.search(query.user_id == user.id)[0].get("current_conversation", None)
+            conversation_id = self.current_conversation.search(query.user_id == str(user.id))[0].get("current_conversation", None)
             if conversation_id is None:
                 return None
             self.get_conversation(user, conversation_id)

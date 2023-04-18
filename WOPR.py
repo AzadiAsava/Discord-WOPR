@@ -8,7 +8,6 @@ import os
 import json
 from chatgpt import extract_datasource, get_is_request_to_change_topics, get_new_or_existing_conversation, merge_conversations, summarize, summarize_knowledge, find_similar_conversations
 from db import Database
-import wikipedia
 from dto import Conversation, Message
 from intent_classifier import MessageHandler
 
@@ -157,7 +156,9 @@ async def on_message(message):
     if message.author.bot:
         return
     current_convo = db.get_current_conversation(message.author)
-    await handler.handle_message(Message.from_message(message, current_convo.summary if current_convo else ""), db, message.channel)
+    async def handle_message_async(message):
+        return await handler.handle_message(Message.from_message(message, current_convo.summary if current_convo else ""), db, message.channel)
+    asyncio.create_task(handle_message_async(message))
     
 token = os.environ.get("Discord-Token", None)
 if token is None:

@@ -7,7 +7,7 @@ app_id = os.environ.get("WolframAlpha-App-ID")
 # Create a client object with the app_id
 client = Client(app_id)
 
-def query_wolfram(query):
+async def query_wolfram(query):
     # Send the query to Wolfram|Alpha and get the response
     res = client.query(query)
     try:

@@ -3,7 +3,7 @@ from abc import abstractmethod
 import asyncio
 from collections import OrderedDict
 from typing import AsyncGenerator, Tuple, Union, Optional
-from chatgpt import extract_preference, extract_preferences, extract_urls, find_similar_conversations, get_is_request_to_change_topics, get_new_or_existing_conversation, get_wolfram_query, merge_conversations, send_to_ChatGPT
+from chatgpt import extract_preferences, extract_urls, find_similar_conversations, get_is_request_to_change_topics, get_new_or_existing_conversation, get_wolfram_query, merge_conversations, get_completion
 from chatgpt import extract_topic, summarize, summarize_knowledge
 import wikipedia
 from typing import Optional, Callable, List
@@ -149,7 +149,7 @@ class ConversationManager:
         if conversation is None:
             raise ValueError("No conversation found for user.")
         await conversation.add_user(user_input, self.db)
-        content = await send_to_ChatGPT(conversation.get_conversation())
+        content = await get_completion(conversation.get_conversation())
         conversation.add_assistant(content)
         conversation.summary = await summarize(str(conversation))
         self.db.set_conversation(user, conversation)

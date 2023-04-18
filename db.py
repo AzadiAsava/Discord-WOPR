@@ -1,6 +1,8 @@
 from __future__ import annotations
+import discord
 from tinydb import TinyDB, Query
-from typing import List, Optional, Type, Any
+from tinydb.queries import QueryInstance
+from typing import List, Optional, Type, Any, Union
 import jsonpickle
 from tinydb_serialization import Serializer
 from tinydb_serialization import SerializationMiddleware
@@ -9,6 +11,7 @@ from dto import Conversation
 from dto import User, UserConversation
 from external_datasource import DataSource
 
+UserUnion = Union[User, discord.User]
 class JSONSerializer(Serializer):
     OBJ_CLASS : Type[object] = object
 
@@ -18,6 +21,9 @@ class JSONSerializer(Serializer):
     def decode(self, s):
         return jsonpickle.decode(s)
     
+def get_conversation_query(user: UserUnion, conversation_id : str) -> QueryInstance:
+    query = Query()
+    return query.user.id == str(user.id) and query.conversation.id == conversation_id
     
 class Database:
     def __init__(self, db_path="db.json"):
@@ -26,6 +32,7 @@ class Database:
         self.db = TinyDB(db_path, indent=4, separators=(',', ': '), ensure_ascii=False, storage=middleware) 
         self.preferences = self.db.table("preferences")
         self.conversations = self.db.table("conversations")
+        self.current_conversation = self.db.table("current_conversation")
         self.knowledge = self.db.table("knowledge")
         self.datasources = self.db.table("datasources")
 
@@ -85,48 +92,45 @@ class Database:
             del datasources[datasource_name]
             self.datasources.update({"datasources": datasources}, query.user_id == user_id)
 
-    def get_conversations(self, user : User) -> List[UserConversation]:
+    def get_conversations(self, user : UserUnion) -> List[Conversation]:
         query = Query()
-        if not self.conversations.contains(query.user.id == user.id):
-            return {}
+        if not self.conversations.contains(query.user_id == str(user.id)):
+            return []
         else:
-            return self.conversations.search(query.user.id == user.id)[0].get("conversations", {})
+            result = self.conversations.search(query.user_id == str(user.id))
+            return [r.get("conversation", None) for r in result]
     
-    def get_conversation(self, user : User, conversation_id : str) -> Optional[Conversation]:
+    def get_conversation(self, user : UserUnion, conversation_id : str) -> Optional[Conversation]:
+        result = self.conversations.get(get_conversation_query(user, conversation_id))
+        if result is None:
+            return None
+        return result.get("conversation", None)    
+    def set_conversation(self, user: UserUnion, conversation : Conversation):
         query = Query()
-        return self.conversations.get(query.user.id == user.id and query.conversation.id == conversation_id).get("conversation", None)
-
-    def set_conversation(self, user_id, conversation):
-        query = Query()
-        if not self.conversations.contains(query.user_id == user_id):
-            self.conversations.insert({"user_id": user_id, "conversations": {conversation.id: conversation}})
+        if not self.conversations.contains(get_conversation_query(user, conversation.id)):
+            self.conversations.insert(UserConversation(user_id=str(user.id), conversation=conversation).__dict__)
         else:
-            conversations = self.conversations.search(query.user_id == user_id)[0].get("conversations", {})
-            conversations[conversation.id] = conversation
-            self.conversations.update({"conversations": conversations}, query.user_id == user_id)
+            self.conversations.update(UserConversation(user_id=str(user.id), conversation=conversation).__dict__, get_conversation_query(user, conversation.id))
 
-    def delete_conversation(self, user_id, conversation_id):
+    def delete_conversation(self, user: UserUnion, conversation_id : str):
+        return self.conversations.remove(get_conversation_query(user, conversation_id))
+
+    def set_current_conversation(self, user: UserUnion, conversation : Conversation):
         query = Query()
-        if not self.conversations.contains(query.user_id == user_id):
-            return
+        if not self.current_conversation.contains(get_conversation_query(user, conversation.id)):
+            self.current_conversation.insert({"user_id":str(user.id), "conversation_id": conversation.id})
         else:
-            conversations = self.conversations.search(query.user_id == user_id)[0].get("conversations", {})
-            del conversations[conversation_id]
-            self.conversations.update({"conversations": conversations}, query.user_id == user_id)
+            self.db.update({"user_id":str(user.id), "conversation_id": conversation.id}, query.user_id == str(user.id))
 
-    def set_current_conversation(self, user_id, conversation_id):
+    def get_current_conversation(self, user : User) -> Optional[Conversation]:
         query = Query()
-        if not self.db.contains(query.user_id == user_id):
-            self.db.insert({"user_id": user_id, "current_conversation": conversation_id})
-        else:
-            self.db.update({"current_conversation": conversation_id}, query.user_id == user_id)
-
-    def get_current_conversation(self, user_id) -> Optional[str]:
-        query = Query()
-        if not self.db.contains(query.user_id == user_id):
+        if not self.db.contains(query.user_id == user.id):
             return None
         else:
-            return self.db.search(query.user_id == user_id)[0].get("current_conversation", None)
+            conversation_id = self.current_conversation.search(query.user_id == user.id)[0].get("current_conversation", None)
+            if conversation_id is None:
+                return None
+            self.get_conversation(user, conversation_id)
         
     def get_knowledge(self, user_id) -> str:
         query = Query()

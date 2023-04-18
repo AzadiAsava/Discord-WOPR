@@ -52,12 +52,12 @@ class ChangeCurrentConversationAction(Action):
                 new_conversation = Conversation.new_conversation()
                 database.set_conversation(message.user, new_conversation)
                 database.set_current_conversation(message.user, new_conversation)
-                sendable.send("I think this is a new conversation. One moment please...")
+                await sendable.send("I think this is a new conversation. One moment please...")
                 raise ConversationChangeException
             elif conversations[conversation_index].id == conversation.id:
                 return
             else:
-                sendable.send("Im changing topics to a prior conversation. One moment please...")
+                await sendable.send("Im changing topics to a prior conversation. One moment please...")
                 database.set_current_conversation(message.user, conversations[conversation_index])
                 raise ConversationChangeException
         except:

@@ -8,7 +8,7 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from chatgpt import get_git_repo_and_options
 from intent_classifier import Intent, IntentClassifier, Sendable, SubIntent
-from action import Action
+from action import Action, UpdateKnowledgeAction
 from dto import Message
 from typing import List
 from actions.git import GitCloneAction
@@ -17,7 +17,7 @@ from intent_classifier import ConversationSummaryAction
 @dataclass
 class GitIntent(Intent):
     name:str="Git Intent"
-    description:str="A command or request to do anything involving git or that might be best satisfied by using git."
+    description:str="Looks like a command or request to invoke git or use git to do something in any way."
     async def get_actions(self, message: Message, database : Database, sendable : Sendable) -> List[Action]:
             await sendable.send("I think you want me to do something with Git. One moment please...")
             intent_classifier = IntentClassifier()
@@ -40,5 +40,5 @@ class GitCloneIntent(GitSubIntent):
         repo = await get_git_repo_and_options(message.text)
         if repo is None:
             return [] #TODO: return an error message
-        return [GitCloneAction(repo), ConversationSummaryAction()]
+        return [GitCloneAction(repo), ConversationSummaryAction(), UpdateKnowledgeAction()]
         

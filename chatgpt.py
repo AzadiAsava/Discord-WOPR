@@ -175,10 +175,12 @@ async def extract_datasource(query : str) -> Optional[dict[str,str]]:
 async def classify_intent(categories : List[str], query : str, context: str) -> int:
     convo = [ 
         {"role":"assistant", "content": "For context: " + context},
-        {"role":"system", "content": "You are a classification agent that knows how to classify text into one of a list of options listed, or \"None of the above.\" if it doesnt match any of the listed options."},
+        {"role":"system", "content": "You are a classification agent that knows how to classify text into EXACTLY ONE of a list of options listed, or \"None of the above.\" if it doesnt match any of the listed options."},
+        {"role":"system", "content":"For example if the choice was 2, you would reply with ```yaml\n2: Choice 2\n``` and nothing else."},
         {"role":"user", "content": "Here's the list of possible options:"},
         ] + [{"role": "user", "content": f"{i}: {j}"} for i, j in enumerate(categories)] + \
-        [{"role": "user", "content": f'Please classify this as one of the above options listed: "{query}". Make sure you block quote the output as YAML as a map keyed by the option number.'}]
+        [{"role": "user", "content": f'Please classify this as one of the above options listed: "{query}". Make sure you block quote the output as YAML as a map keyed by the option number and ONLY GIGE ONE ANSWER. You should avoid "None of the above" if the answer is close.'}]
+
     result = await get_completion(convo, temperature=0)
     try:
         return int(re.findall(r"\d+", result)[0])

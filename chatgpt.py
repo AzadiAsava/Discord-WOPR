@@ -26,10 +26,11 @@ def tries(times):
     return func_wrapper
 
 @tries(3)
-async def get_completion(messages :list[dict[str,str]], model:str=model_engine) -> str:
+async def get_completion(messages :list[dict[str,str]], model:str=model_engine, temperature:float=0.5) -> str:
     response = openai.ChatCompletion.create(
             model=model,
-            messages=messages)
+            messages=messages,
+            temperature=temperature)
     if response is None:
         raise Exception("No response from OpenAI")
     return response.choices[0]['message']['content'] # type: ignore
@@ -178,7 +179,7 @@ async def classify_intent(categories : List[str], query : str, context: str) -> 
         {"role":"user", "content": "Here's the list of possible options:"},
         ] + [{"role": "user", "content": f"{i}: {j}"} for i, j in enumerate(categories)] + \
         [{"role": "user", "content": f'Please classify this as one of the above options listed: "{query}". Make sure you block quote the output as YAML as a map keyed by the option number.'}]
-    result = await get_completion(convo)
+    result = await get_completion(convo, temperature=0)
     try:
         return int(re.findall(r"\d+", result)[0])
     except:
@@ -188,11 +189,11 @@ async def extract_preferences(message) -> dict[str,str]:
     convo = [
         {"role":"system","content":"You are a helpful AI assistant capable of taking a message and extracting a key/value set of preferences and giving the value back as YAML."},
         {"role":"system","content":"""For example, if I were to say to you, "Remember to always call me Sir, and my Birthday is 10/10/1990" you would say:
-        ```yaml
-         "My name": "Sir"
-         "My birthday": "10/10/1990"
-         "Always call me": "Sir"
-        ```"""},
+```yaml
+"My name": "Sir"
+"My birthday": "10/10/1990"
+"Always call me": "Sir"
+```"""},
         {"role":"user","content":"Please convert the following into a YAML map of preferences: " + message}
     ]
     result = (await get_completion(convo))

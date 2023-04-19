@@ -25,9 +25,11 @@ class GitCloneAction(Action):
                 raise ValueError("No conversation found.")
             conversation.add_system("A git repository called " + self.repo["repo"] + " has been cloned from " + self.repo["url"] + " with the options: " + self.repo["options"])
             database.set_conversation(message.user, conversation)
+
 def invoke_at(path: str):
     def parameterized(func):
         def wrapper(*args, **kwargs):
+            os.makedirs(path, exist_ok=True)
             cwd = os.getcwd()
             os.chdir(path)
 
@@ -41,10 +43,6 @@ def invoke_at(path: str):
         return wrapper
 
     return parameterized 
-
-if not os.path.exists("scratch/git"):
-    os.mkdir("scratch")
-    os.mkdir("scratch/git")
 
 @invoke_at("scratch/git")
 def do_command(command : dict[str, str]) -> str:

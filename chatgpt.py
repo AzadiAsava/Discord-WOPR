@@ -221,3 +221,26 @@ async def remove_change_of_topic(message : str) -> str:
     except:
         return message
         
+async def get_git_repo_and_options(message) -> dict[str,str]:
+    convo = [
+        {"role":"system","content":"You are a helpful AI assistant who knows how to extract git urls from requests to do things with git, as well as the associated git command and options required to pull off the request, and return the results as a blockquoted yaml map."},
+        {"role":"system","content":"""For example, if i said, "Please clone the stable branch of https://github.com/Significant-Gravitas/Auto-GPT" you would reply:
+```yaml
+repo: Auto-GPT
+executable: git
+command: clone
+url: https://github.com/Significant-Gravitas/Auto-GPT
+options: --branch stable
+```
+"""},
+        {"role":"user","content":"Please convert the following into a YAML map: " + message}
+    ]
+    result = (await get_completion(convo))
+    try:
+        result = result.split("```")[1]
+        if result.lower().startswith("yaml"):
+            result = result[4:]
+        result = yaml.load(result, Loader=yaml.Loader)
+        return result
+    except:
+        return {}

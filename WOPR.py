@@ -7,7 +7,7 @@ import openai
 import os
 import json
 from chatgpt import extract_datasource, get_is_request_to_change_topics, get_new_or_existing_conversation, merge_conversations, summarize, summarize_knowledge, find_similar_conversations
-from db import Database
+from db import Database, UserUnion
 from dto import Conversation, Message
 from intent_classifier import MessageHandler
 
@@ -27,10 +27,10 @@ handler = MessageHandler()
 def get_preference(user, preference, default="") -> Optional[str]:
     return db.get_preference(user, preference, default)
 
-def get_preferences(user: int) -> dict:
+def get_preferences(user: UserUnion) -> dict:
     return db.get_preferences(user)
 
-def set_preference(user : int, preference, value) -> None:
+def set_preference(user : UserUnion, preference, value) -> None:
     db.set_preference(user, preference, value)
 
 def remove_preference(user, preference):

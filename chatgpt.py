@@ -1,9 +1,15 @@
-from typing import AsyncGenerator, Callable, Generator, List, Optional, Tuple
+from __future__ import annotations
+from typing import List, Optional, Tuple, Type
 import openai
 import os
 import re
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
+from retry import retry
 import yaml
+from typing import TypeVar
+import source_utils
+T = TypeVar("T", bound=object)
+
 
 # Create an instance of the SentimentIntensityAnalyzer object
 analyzer = SentimentIntensityAnalyzer()
@@ -11,21 +17,7 @@ analyzer = SentimentIntensityAnalyzer()
 openai.api_key = os.getenv("OpenAIAPI-Token")
 model_engine = "gpt-3.5-turbo"
 
-def tries(times):
-    def func_wrapper(f):
-        async def wrapper(*args, **kwargs):
-            for time in range(times):
-                print('times:', time + 1)
-                # noinspection PyBroadException
-                try:
-                    return await f(*args, **kwargs)
-                except Exception as exc:
-                    pass
-            raise Exception('Failed too many times')
-        return wrapper
-    return func_wrapper
-
-@tries(3)
+@retry(tries=3, delay=3, backoff=2, logger=None)
 async def get_completion(messages :list[dict[str,str]], model:str=model_engine, temperature:float=0.5) -> str:
     response = openai.ChatCompletion.create(
             model=model,
@@ -35,6 +27,15 @@ async def get_completion(messages :list[dict[str,str]], model:str=model_engine, 
         raise Exception("No response from OpenAI")
     return response.choices[0]['message']['content'] # type: ignore
 
+def get_body(message : str) -> str:
+    try:
+        message = message.split('```')[1]
+        if message.lower().startswith('yaml'):
+            message = message[4:]
+        return message.strip()
+    except:
+        return message.strip()
+    
 async def extract_topic(message : str) -> str:
     convo = [
         {"role":"system","content":"You are a helpful AI assistant who knows how to extract a topic from a sentence for searching Wikipedia with. I will supply you with a sentence, and I want you to tell me, in quotes, a word or phrase suitible for searching Wikipedia with. Please supply only the singular thing to search in quotes. For example, if I say 'I want to search Wikipedia for the meaning of life', you should say 'meaning of life' and nothing else."},
@@ -110,8 +111,8 @@ async def merge_conversations(conversation1 : str, conversation2 : str) -> list[
     convo = [
         {"role":"system","content":"You are a helpful AI assistant who knows how to merge two conversations. I will supply you with two conversations, and I want you to make up a new conversation that merges the two conversations into a single conversation."},
         {"role":"user","content":"Here are the two conversations to merge:"},
-        {"role":"user","content":"Conversation 1:\n\n" + conversation1},
-        {"role":"user","content":"Conversation 2:\n\n" + conversation2},
+        {"role":"user","content":"Conversation 1:\n```\n" + conversation1 + "\n```\n"},
+        {"role":"user","content":"Conversation 2:\n```\n" + conversation2 + "\n```\n"},
         {"role":"user","content":"Please produce a new conversation that merges the two conversations into a single conversation."}
     ]
     result = (await get_completion(convo)).replace('"', '').replace("'", "").rstrip().lstrip()
@@ -158,9 +159,7 @@ async def extract_datasource(query : str) -> Optional[dict[str,str]]:
     ]
     result = (await get_completion(convo)).replace('"', '').replace("'", "").rstrip().lstrip()
     try:
-        result = result.split("```")[1]
-        if result.lower().startswith("yaml"):
-            result = result[4:]
+        result = get_body(result)
         result = yaml.load(result, Loader=yaml.Loader)
         out = {"context":query}
         for k, v in result.items():
@@ -172,20 +171,28 @@ async def extract_datasource(query : str) -> Optional[dict[str,str]]:
     except:
         return None
 
-async def classify_intent(categories : List[str], query : str, context: str) -> int:
+async def classify_intent(categories : List[str], query : str, context: Optional[str] = None) -> Optional[List[str]]:
     convo = [ 
-        {"role":"assistant", "content": "For context: " + context},
-        {"role":"system", "content": "You are a classification agent that knows how to classify text into EXACTLY ONE of a list of options listed, or \"None of the above.\" if it doesnt match any of the listed options."},
-        {"role":"system", "content":"For example if the choice was 2, you would reply with ```yaml\n2: Choice 2\n``` and nothing else."},
-        {"role":"user", "content": "Here's the list of possible options:"},
-        ] + [{"role": "user", "content": f"{i}: {j}"} for i, j in enumerate(categories)] + \
-        [{"role": "user", "content": f'Please classify this as one of the above options listed: "{query}". Make sure you block quote the output as YAML as a map keyed by the option number and ONLY GIGE ONE ANSWER. You should avoid "None of the above" if the answer is close.'}]
-
+        {"role":"system", "content": "You are a classification agent that knows how to classify text as being related or similar or losely described by one or more of the options listed, or \"None of the above.\" if it doesnt match any of the listed options."},
+        {"role":"system", "content":"For example you would reply with:\n```yaml\n- This is the first option that was chosen.\n- This is the second option chosen.\n```\n Assuming those two options are similar or related. Make sure you block quote the output as YAML as an array. You should avoid \"None of the above.\" if the answer is in any way related to another answer."},
+        {"role":"user", "content": "Here's the list of possible options:\n```yaml\n" + "\n".join(f"- {j}" for j in categories) + "\n```"}]
+    if context is not None:
+        convo += [{"role": "user", "content": "For context: " + context}]
+    convo += [{"role": "user", "content": f'Please classify this message as one or more of the above options listed:\n"{query}"'}]
     result = await get_completion(convo, temperature=0)
     try:
-        return int(re.findall(r"\d+", result)[0])
+        result = get_body(result)
+        output = []
+        result = yaml.load(result, Loader=yaml.Loader)
+        if isinstance(result, str):
+            result = [result]
+        for r in result:
+            for c in categories:
+                if c.lower() in r.lower():
+                    output.append(c)
+        return output if len(output) > 0 else None
     except:
-        return 0
+        return None
 
 async def extract_preferences(message) -> dict[str,str]:
     convo = [
@@ -198,11 +205,9 @@ async def extract_preferences(message) -> dict[str,str]:
 ```"""},
         {"role":"user","content":"Please convert the following into a YAML map of preferences: " + message}
     ]
-    result = (await get_completion(convo))
+    result = await get_completion(convo)
     try:
-        result = result.split("```")[1]
-        if result.lower().startswith("yaml"):
-            result = result[4:]
+        result = get_body(result)
         result = yaml.load(result, Loader=yaml.Loader)
         return result
     except:
@@ -216,11 +221,7 @@ async def remove_change_of_topic(message : str) -> str:
     ]
     result = await get_completion(convo)
     try:
-        result = result.split("```")[1]
-        if result.lower().startswith("yaml"):
-            result = result[4:]
-        result=result.strip()
-        return result
+        return get_body(result)
     except:
         return message
         
@@ -247,3 +248,22 @@ options: --branch stable
         return result
     except:
         return {}
+    
+
+async def get_structured_classification(message: str, cls: Type[T], constraints: dict[str, List[str]] = {}) -> List[T]:
+    con = "".join((f"The \"{k}\" parameter MUST be one of the following values:\n```yaml\n"
+                   + "\n".join(f"- {x}" for x in v)
+                   + "\n```\n")
+                  for k, v in constraints.items())
+    convo = [{"role": "system", "content": "You are a helpful AI assistant who knows how to extract structured data from a message or messages, and return the results as a blockquoted yaml array of " + cls.__name__ + " object shaped dictionaries, one for each part of what is said."}]
+    convo += [{"role": "system", "content": "The message may contain multiple requests, in which case you should return an object for each portion of the message."}]
+    convo += [{"role":"system","content": f"Here are the Python classes that the YAML object must deserialize to:\n```python\n{source_utils.get_source(cls)}\n```"}]
+    if constraints:
+        convo += [{"role":"system","content": f"Here are the required values for the parameters:\n{con}\n"}]
+    convo += [{"role": "user", "content": f'Please convert the following into a blockquoted YAML array of dictionaries that follows the above constraints: "{message}"\n'}]
+    result = (await get_completion(convo))
+    result = get_body(result)
+    result = source_utils.from_yaml(result, cls)
+    if not isinstance(result, list):
+        result = [result]
+    return result

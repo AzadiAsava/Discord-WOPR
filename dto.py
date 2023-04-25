@@ -10,21 +10,20 @@ import discord
 class Message:
     user:User
     text:str
-    context:str
     channel:Optional[Channel]
     guild:Optional[Guild]
     followup:List[str]
     datetime:datetime
     discord_message_id:int
     id:str = str(uuid4().hex)
+    classifications:Optional[List[MessageClassification]] = None
     @staticmethod
-    def from_message(message : discord.Message, context : str) -> Message:
+    def from_message(message : discord.Message) -> Message:
         if isinstance(message.author, discord.User):
             #cast the author to a discord.user
             user = User.from_discord_user(message.author)
             return Message(user,
                        message.content,
-                       context,
                        Channel.from_discord_channel(message.channel), 
                        Guild.from_discord_guild(message.guild),
                        [],
@@ -34,7 +33,6 @@ class Message:
             user = User.from_discord_user(message.author._user)
             return Message(user,
                        message.content,
-                       context,
                        Channel.from_discord_channel(message.channel), 
                        Guild.from_discord_guild(message.guild),
                        [],
@@ -184,4 +182,25 @@ class Endpoint:
     response_format: str
     method: str
     roles: List[str]
+
+import dataclasses
+@dataclass
+class MessageClassification:
+  original_message:str
+  message_part:str
+  intent:Optional[str] = None
+  categories:List[str] = dataclasses.field(default_factory=list)
+  parameters:List[str] = dataclasses.field(default_factory=list)
+  reply:Optional[str] = None
+  justifications_for_reply:List[Justification] = dataclasses.field(default_factory=list)
+  follow_up_items:List[MessageClassification] = dataclasses.field(default_factory=list)
+
+@dataclass
+class Justification:
+    subject:Optional[str] = None
+    object:Optional[str] = None
+    intent:Optional[str] = None
+    action:Optional[str] = None
+    description:Optional[str] = None
+
 

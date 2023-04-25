@@ -6,10 +6,12 @@ from discord import app_commands, SelectMenu, SelectOption
 import openai
 import os
 import json
+from action import ConversationCompletionAction
 from chatgpt import extract_datasource, get_is_request_to_change_topics, get_new_or_existing_conversation, merge_conversations, summarize, summarize_knowledge, find_similar_conversations
 from db import Database, UserUnion
+from discord_handler import DiscordHandler, DiscordSendable
 from dto import Conversation, Message
-from intent_classifier import MessageHandler
+from sendable import Sendable
 
 openai.api_key = os.environ.get("OpenAIAPI-Token")
 model_engine = "gpt-3.5-turbo"
@@ -22,7 +24,7 @@ tree = app_commands.CommandTree(client)
 
 commands = json.load(open("commands.json", "r"))
 
-handler = MessageHandler()
+handler = DiscordHandler()
 
 def get_preference(user, preference, default="") -> Optional[str]:
     return db.get_preference(user, preference, default)
@@ -61,6 +63,8 @@ async def send(channel, text):
     for chunk in split_into_chunks(text):
         await channel.send(chunk)
 
+async def complete(message:Message, database: Database, sendable: Sendable):
+    await ConversationCompletionAction()(message, database, sendable)
 
 for command in commands:
     def command_maker(system, user):
@@ -69,7 +73,9 @@ for command in commands:
             convo = Conversation.new_conversation()
             db.set_conversation(interaction.user, convo)
             db.set_current_conversation(interaction.user, convo)
-            await handler.send_conversation_for_completion(Message.from_message(interaction.message, ""), db, interaction)
+            sendable = DiscordSendable(interaction.followup)
+            message = Message.from_message(interaction.message)
+            await complete(message, db, sendable)
         return interaction
     tree.add_command(discord.app_commands.Command(name=command["command"], description=command["description"], callback=command_maker(command["system"], command["user"])))
 
@@ -157,7 +163,7 @@ async def on_message(message):
         return
     current_convo = db.get_current_conversation(message.author)
     async def handle_message_async(message):
-        return await handler.handle_message(Message.from_message(message, current_convo.summary if current_convo else ""), db, message.channel)
+        return await handler.handle_discord_message(message, db, message.channel)
     asyncio.create_task(handle_message_async(message))
     
 token = os.environ.get("Discord-Token", None)

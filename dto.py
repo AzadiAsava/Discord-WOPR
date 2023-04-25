@@ -148,6 +148,7 @@ class UserPreferences(UserValues):
 class UserConversation:
     user_id:str
     conversation:Conversation
+    conversation_id:str
 @dataclass
 class UserCurrentConversation:
     user_id:str

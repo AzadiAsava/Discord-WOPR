@@ -45,7 +45,7 @@ async def extract_topic(message : str) -> str:
 
 async def summarize(conversation: str) -> str:
     convo = [
-        {"role":"system","content":"You are a helpful AI assistant who knows how to create detailed summaries of content. I will supply you with some content, and I want you to tell me, in quotes, a summary of the conversation. Please supply as many important details in the summary as you can."},
+        {"role":"system","content":"You are a helpful AI assistant who knows how to extract information from a conversational text for integration into a knowledge base, and return only the summarized content as a list without making reference to the request. Please summarize the entirety of the following text as a list of key factual and conversational datapoints from the conversation. Please supply as many important details in the summary as you can, including descriptions or summaries of all provided examples, and return only the bulleted list of datapoints. Include nothing but the list in your reply. Don't use words like \"summary\" or \"prior conversations\" in your reply unless they are part of the data in the list itself. Please remember to summarize ALL of the text, even if there are large spaces between words or paragraphs."},
         {"role":"user","content":"What is a highly detailed summary of this content? \"" + conversation[:3000] + "\" Please only supply the summary in quotes. Make sure to include the quotes and nothing else except the summary in quotes."}
     ]
     return (await get_completion(convo)).replace('"', '').replace("'", "").rstrip().lstrip()
